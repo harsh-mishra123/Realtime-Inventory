@@ -46,23 +46,33 @@ manager = ConnectionManager()
 
 #Postgresql Listener
 async def listen_to_postgres():
-    conn = await get_async_connection()
-    await conn.execute("LISTEN inventory_channel")
-    print("Listening to PostgreSQL notifications...")
-    
-    while True:
-        try:
-            notification = await conn.get_notification(timeout=None)
-            if notification:
-                print(f"Received: {notification.payload}")
-                await manager.broadcast(json.loads(notification.payload))
-        except Exception as e:
-            print(f"Error: {e}")
-            await asyncio.sleep(1)
-
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(listen_to_postgres())
+    try:
+        conn = await get_async_connection()
+        # Listen channel set karo
+        await conn.execute("LISTEN inventory_channel")
+        print("Listening to PostgreSQL notifications...")
+        
+        while True:
+            try:
+                # asyncpg mein notifications check karne ka sahi tarika
+                msg = await conn.get_notification(timeout=1.0)
+                if msg:
+                    print(f"Received: {msg.payload}")
+                    await manager.broadcast(json.loads(msg.payload))
+                else:
+                    # No notification, continue loop
+                    await asyncio.sleep(0.1)
+            except asyncio.TimeoutError:
+                # Timeout ho gaya, continue loop
+                continue
+            except Exception as e:
+                print(f"Error in notification loop: {e}")
+                await asyncio.sleep(1)
+    except Exception as e:
+        print(f"Error in listener: {e}")
+        await asyncio.sleep(5)
+        # Restart listener
+        asyncio.create_task(listen_to_postgres())
 
 
 #Routes
