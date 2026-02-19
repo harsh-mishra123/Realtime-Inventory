@@ -3,38 +3,36 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from typing import List
-import asyncio
 import json
-import asyncpg
+import threading
+import select
+import psycopg2
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-from database import get_db, get_async_connection, engine
+from database import get_db, get_psycopg_connection, engine
 from models import Base, Inventory
 
-
-
-#ab we are going to create tables and fastapi app
-#creating dataabse tables
+# Create database tables
 Base.metadata.create_all(bind=engine)
 
-#initialize FastAPI
-app = FastAPI(title="Realtime Inventory Dashboard")
+# Initialize FastAPI
+app = FastAPI(title="Real-Time Inventory Dashboard")
 templates = Jinja2Templates(directory="templates")
 
-
-#connection manager, all the connection work is up here ig
+# WebSocket Connection Manager
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
-        
+    
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        print(f"Client connected. Total clients: {len(self.active_connections)}")
-        
+        print(f"✅ Client connected. Total: {len(self.active_connections)}")
+    
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
-        print(f"Client disconnected. Total clients: {len(self.active_connections)}")
-        
+        print(f"❌ Client disconnected. Total: {len(self.active_connections)}")
+    
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
             try:
@@ -44,38 +42,61 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-#Postgresql Listener
-async def listen_to_postgres():
-    try:
-        conn = await get_async_connection()
-        # Listen channel set karo
-        await conn.execute("LISTEN inventory_channel")
-        print("Listening to PostgreSQL notifications...")
-        
-        while True:
-            try:
-                # asyncpg mein notifications check karne ka sahi tarika
-                msg = await conn.get_notification(timeout=1.0)
-                if msg:
-                    print(f"Received: {msg.payload}")
-                    await manager.broadcast(json.loads(msg.payload))
-                else:
-                    # No notification, continue loop
-                    await asyncio.sleep(0.1)
-            except asyncio.TimeoutError:
-                # Timeout ho gaya, continue loop
-                continue
-            except Exception as e:
-                print(f"Error in notification loop: {e}")
-                await asyncio.sleep(1)
-    except Exception as e:
-        print(f"Error in listener: {e}")
-        await asyncio.sleep(5)
-        # Restart listener
-        asyncio.create_task(listen_to_postgres())
+# PostgreSQL Listener in Background Thread
+def postgres_listener():
+    """Listen for PostgreSQL notifications and broadcast via WebSocket"""
+    import asyncio
+    
+    while True:
+        try:
+            # Connect to PostgreSQL
+            conn = psycopg2.connect(
+                database="inventory_db",
+                user="harshmishra",
+                password="",  # Agar password hai to yahan dalo
+                host="localhost"
+            )
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            
+            # Listen on channel
+            cursor = conn.cursor()
+            cursor.execute("LISTEN inventory_channel;")
+            print("✅ PostgreSQL listener started with psycopg2...")
+            
+            # Wait for notifications
+            while True:
+                select.select([conn], [], [], 5)
+                conn.poll()
+                
+                while conn.notifies:
+                    notify = conn.notifies.pop(0)
+                    print(f"📨 Received: {notify.payload}")
+                    
+                    # Broadcast to WebSocket clients
+                    try:
+                        # Create new event loop for async operation
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(manager.broadcast(json.loads(notify.payload)))
+                        loop.close()
+                    except Exception as e:
+                        print(f"❌ Broadcast error: {e}")
+                        
+        except Exception as e:
+            print(f"❌ Listener error: {e}")
+            import time
+            time.sleep(5)  # Wait before reconnecting
 
+# Start listener on startup
+@app.on_event("startup")
+async def startup_event():
+    # Start PostgreSQL listener in background thread
+    thread = threading.Thread(target=postgres_listener, daemon=True)
+    thread.start()
+    print("🚀 Server started with PostgreSQL listener")
+    print("📡 WebSocket endpoint: ws://localhost:8000/ws")
 
-#Routes
+# Routes
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -85,6 +106,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
+            # Keep connection alive
             await websocket.receive_text()
     except:
         manager.disconnect(websocket)
