@@ -32,5 +32,5 @@ def get_psycopg_connection():
     return conn
 
 if __name__ == "__main__":
-    print(f"✅ Database URL: {DATABASE_URL}")
-    print("✅ Setup complete!")
+    print(f" Database URL: {DATABASE_URL}")
+    print("Setup complete!")
