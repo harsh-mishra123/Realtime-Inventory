@@ -27,11 +27,11 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        print(f"✅ Client connected. Total: {len(self.active_connections)}")
+        print(f"Client connected. Total: {len(self.active_connections)}")
     
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
-        print(f"❌ Client disconnected. Total: {len(self.active_connections)}")
+        print(f"Client disconnected. Total: {len(self.active_connections)}")
     
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
@@ -61,7 +61,7 @@ def postgres_listener():
             # Listen on channel
             cursor = conn.cursor()
             cursor.execute("LISTEN inventory_channel;")
-            print("✅ PostgreSQL listener started with psycopg2...")
+            print(" PostgreSQL listener started with psycopg2...")
             
             # Wait for notifications
             while True:
@@ -80,10 +80,10 @@ def postgres_listener():
                         loop.run_until_complete(manager.broadcast(json.loads(notify.payload)))
                         loop.close()
                     except Exception as e:
-                        print(f"❌ Broadcast error: {e}")
+                        print(f"Broadcast error: {e}")
                         
         except Exception as e:
-            print(f"❌ Listener error: {e}")
+            print(f" Listener error: {e}")
             import time
             time.sleep(5)  # Wait before reconnecting
 
@@ -93,8 +93,8 @@ async def startup_event():
     # Start PostgreSQL listener in background thread
     thread = threading.Thread(target=postgres_listener, daemon=True)
     thread.start()
-    print("🚀 Server started with PostgreSQL listener")
-    print("📡 WebSocket endpoint: ws://localhost:8000/ws")
+    print(" Server started with PostgreSQL listener")
+    print(" WebSocket endpoint: ws://localhost:8000/ws")
 
 # Routes
 @app.get("/", response_class=HTMLResponse)
