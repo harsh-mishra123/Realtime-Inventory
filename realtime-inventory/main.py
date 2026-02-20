@@ -70,7 +70,7 @@ def postgres_listener():
                 
                 while conn.notifies:
                     notify = conn.notifies.pop(0)
-                    print(f"📨 Received: {notify.payload}")
+                    print(f"Received: {notify.payload}")
                     
                     # Broadcast to WebSocket clients
                     try:
